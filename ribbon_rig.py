@@ -5,7 +5,7 @@
 import maya.cmds as cmds
 import rig_modules.controller_shape as cs
 
-import maya.cmds as cmds
+import maya.api.OpenMaya as om
 
 def create_joints_on_uvPin(curve, curve_up, num_joints=5, prefix="Ribbon",ctrl_instance=None,color_index=17,side='L'):
     '''
@@ -244,79 +244,176 @@ def create_ribbon_curve(side=None,typ=None,num_joints=5,main_ctrl_instance=None,
     cmds.parent(curve, curve_up, minor_grp, ribbon_grp)
     return ribbon_grp
 
-def ribbon_squash_stretch(ribbon_grp,part=None,target_ctrl=None,scale_source=None):
-    '''
-    Adds squash and stretch functionality to the ribbon rig by measuring the curve length and scaling joints accordingly.
-    
-    Args:
-        ribbon_grp (str): The top-level group of the ribbon
-        target_ctrl (str): The target control that will drive the squash and stretch
-        world_ctrl (str, optional): The world control that may be used in scaling calculations (default is None)
 
-    '''
+def get_param_on_curve(curve, target):
+    pos = cmds.xform(target, q=True, ws=True, t=True)
+
+    sel = om.MSelectionList()
+    sel.add(curve)
+    dag = sel.getDagPath(0)
+
+    curveFn = om.MFnNurbsCurve(dag)
+    point = om.MPoint(pos)
+
+    # 更穩
+    _, param = curveFn.closestPoint(point, space=om.MSpace.kWorld)
+
+    return param
+
+
+def ribbon_squash_stretch(ribbon_grp, target_ctrl=None, scale_source=None):
+
     side = ribbon_grp.split('_')[0]
     prefix = ribbon_grp.split('_')[1]
-    # add attr for target ctrl 
-    cmds.addAttr(target_ctrl, longName=f'{part}VolumePreserve', attributeType='bool', defaultValue=False,keyable=True)
-    cmds.addAttr(target_ctrl, longName=f'{part}VolumeY', attributeType='float', defaultValue=0.5, keyable=True)
-    cmds.addAttr(target_ctrl, longName=f'{part}VolumeZ', attributeType='float', defaultValue=0.5, keyable=True)
-    #create loc to caculate distance
-    loc_start = cmds.spaceLocator(name=ribbon_grp.replace('_grp','_start_loc'))[0]
-    cmds.hide(loc_start)
-    loc_end = cmds.spaceLocator(name=ribbon_grp.replace('_grp','_end_loc'))[0]
-    cmds.hide(loc_end)
-    cmds.parent(loc_start, f'output_{side}_{prefix}Main_ctrl_0001')
-    cmds.parent(loc_end, f'output_{side}_{prefix}Main_ctrl_0003')
-    cmds.setAttr(f'{loc_start}.translate', 0, 0, 0)
-    cmds.setAttr(f'{loc_end}.translate', 0, 0, 0)
-    #create distance node   
+    part = prefix.replace('Ribbon', '')
+
+    # =========================
+    # ATTRIBUTES
+    # =========================
+    cmds.addAttr(target_ctrl, ln=f'{part}VolumePreserve', at='bool', dv=0, k=1)
+    cmds.addAttr(target_ctrl, ln=f'{part}VolumeY', at='float', dv=0.5, k=1)
+    cmds.addAttr(target_ctrl, ln=f'{part}VolumeZ', at='float', dv=0.5, k=1)
+    cmds.addAttr(target_ctrl, ln=f'{part}VolumeCentered', at='float', min=0, max=1, dv=1, k=1)
+    cmds.addAttr(target_ctrl, ln=f'{part}Center', at='float', min=0, max=1, dv=0.5, k=1)
+    cmds.addAttr(target_ctrl, ln=f'{part}Falloff', at='float', min=0.001, dv=0.5, k=1)
+
+    # =========================
+    # LENGTH SETUP
+    # =========================
+    loc_start = cmds.spaceLocator(name=ribbon_grp.replace('_grp', '_start_loc'))[0]
+    loc_end = cmds.spaceLocator(name=ribbon_grp.replace('_grp', '_end_loc'))[0]
+
+    cmds.hide(loc_start, loc_end)
+
+    target1 = cmds.ls(f'output_{side}_{prefix}Main_ctrl_0001', l=True)[0]
+    target2 = cmds.ls(f'output_{side}_{prefix}Main_ctrl_0003', l=True)[0]
+
+    cmds.parent(loc_start, target1)
+    cmds.parent(loc_end, target2)
+
+    cmds.setAttr(loc_start + ".translate", 0, 0, 0)
+    cmds.setAttr(loc_end + ".translate", 0, 0, 0)
+
     dist_node = cmds.createNode('distanceBetween', name=f'{side}_{part}_distanceBetween')
-    cmds.connectAttr(f'{loc_start}.worldPosition[0]', f'{dist_node}.point1', force=True)
-    cmds.connectAttr(f'{loc_end}.worldPosition[0]', f'{dist_node}.point2', force=True)
-    #create multiplyDivide node to calculate scale factor
+    cmds.connectAttr(loc_start + ".worldPosition[0]", dist_node + ".point1")
+    cmds.connectAttr(loc_end + ".worldPosition[0]", dist_node + ".point2")
+
+    original_length = cmds.getAttr(dist_node + ".distance")
+
     rig_scale_md = cmds.createNode('multiplyDivide', name=f'{side}_{part}_rigscale_md')
-    cmds.setAttr(f'{rig_scale_md}.operation', 1) #mult
-    original_length = cmds.getAttr(f'{dist_node}.distance')
-    cmds.setAttr(f'{rig_scale_md}.input1X', original_length)
-    cmds.connectAttr(f'{scale_source}.scaleX', f'{rig_scale_md}.input2X', force=True)
-    sretch_md = cmds.createNode('multiplyDivide', name=f'{side}_{part}_stretch_md')
-    cmds.setAttr(f'{sretch_md}.operation', 2) #divide
-    cmds.connectAttr(f'{dist_node}.distance', f'{sretch_md}.input1X', force=True)
-    cmds.connectAttr(f'{rig_scale_md}.outputX', f'{sretch_md}.input2X', force=True)
+    cmds.setAttr(rig_scale_md + ".operation", 1)
+    cmds.setAttr(rig_scale_md + ".input1X", original_length)
+    cmds.connectAttr(scale_source + ".scaleX", rig_scale_md + ".input2X")
+
+    stretch_md = cmds.createNode('multiplyDivide', name=f'{side}_{part}_stretch_md')
+    cmds.setAttr(stretch_md + ".operation", 2)
+    cmds.connectAttr(dist_node + ".distance", stretch_md + ".input1X")
+    cmds.connectAttr(rig_scale_md + ".outputX", stretch_md + ".input2X")
+
     squash_md = cmds.createNode('multiplyDivide', name=f'{side}_{part}_squash_md')
-    cmds.setAttr(f'{squash_md}.operation', 2) #divide
-    cmds.connectAttr(f'{rig_scale_md}.outputX', f'{squash_md}.input1Y', force=True)
-    cmds.connectAttr(f'{rig_scale_md}.outputX', f'{squash_md}.input1Z', force=True)
-    cmds.connectAttr(f'{dist_node}.distance', f'{squash_md}.input2Y', force=True)
-    cmds.connectAttr(f'{dist_node}.distance', f'{squash_md}.input2Z', force=True)
+    cmds.setAttr(squash_md + ".operation", 2)
+    cmds.connectAttr(rig_scale_md + ".outputX", squash_md + ".input1Y")
+    cmds.connectAttr(rig_scale_md + ".outputX", squash_md + ".input1Z")
+    cmds.connectAttr(dist_node + ".distance", squash_md + ".input2Y")
+    cmds.connectAttr(dist_node + ".distance", squash_md + ".input2Z")
+
     power = cmds.createNode('multiplyDivide', name=f'{side}_{part}_power')
-    cmds.setAttr(f'{power}.operation', 3) #power
-    cmds.connectAttr(f'{squash_md}.outputY', f'{power}.input1Y', force=True)
-    cmds.connectAttr(f'{squash_md}.outputZ', f'{power}.input1Z', force=True)
-    cmds.connectAttr(f'{target_ctrl}.{part}VolumeY', f'{power}.input2Y', force=True)
-    cmds.connectAttr(f'{target_ctrl}.{part}VolumeZ', f'{power}.input2Z', force=True)
-    #create condition node for volume preservation
+    cmds.setAttr(power + ".operation", 3)
+    cmds.connectAttr(squash_md + ".outputY", power + ".input1Y")
+    cmds.connectAttr(squash_md + ".outputZ", power + ".input1Z")
+    cmds.connectAttr(f"{target_ctrl}.{part}VolumeY", power + ".input2Y")
+    cmds.connectAttr(f"{target_ctrl}.{part}VolumeZ", power + ".input2Z")
+
     con = cmds.createNode('condition', name=f'{side}_{part}_volumePreserve_con')
-    cmds.connectAttr(f'{target_ctrl}.{part}VolumePreserve', f'{con}.firstTerm', force=True)
-    cmds.setAttr(f'{con}.secondTerm', 1)
-    cmds.connectAttr(f'{sretch_md}.outputX', f'{con}.colorIfTrueR', force=True)
-    cmds.connectAttr(f'{power}.outputY', f'{con}.colorIfTrueG', force=True)
-    cmds.connectAttr(f'{power}.outputZ', f'{con}.colorIfTrueB', force=True)
-    minor_jnt_num = len(cmds.listRelatives(f'{side}_{prefix}Minor_jnt_grp', children=True))
-    #connect-out color to scale of minor joints driven grp 
-    dict = {'X':'R','Y':'G','Z':'B'}
-    for i in range(minor_jnt_num):
-        for axis in ['X','Y','Z']:
-            cmds.connectAttr(f'{scale_source}.scale{axis}', f'zero_{side}_{prefix}Minor_ctrl_{i+1:04d}.scale{axis}', force=True)
-            cmds.connectAttr(f'{con}.outColor{dict[axis]}', f'driven_{side}_{prefix}Minor_ctrl_{i+1:04d}.scale{axis}', force=True)
-    
+    cmds.connectAttr(f"{target_ctrl}.{part}VolumePreserve", con + ".firstTerm")
+    cmds.setAttr(con + ".secondTerm", 1)
+    cmds.connectAttr(stretch_md + ".outputX", con + ".colorIfTrueR")
+    cmds.connectAttr(power + ".outputY", con + ".colorIfTrueG")
+    cmds.connectAttr(power + ".outputZ", con + ".colorIfTrueB")
+
+    # =========================
+    # JOINT LOOP
+    # =========================
+    minor_jnt_grp = f'{side}_{prefix}Minor_jnt_grp'
+    minor_jnts = cmds.listRelatives(minor_jnt_grp, children=True)
+    print(minor_jnts)
+
+    curve = f'{side}_{part}_curve_0001'
+
+    for i, jnt in enumerate(minor_jnts):
+
+        param = get_param_on_curve(curve, jnt)
+
+        # center distance
+        center_dist = cmds.createNode("plusMinusAverage", name=f"{side}_{part}_centerDist_{i+1:04d}")
+        cmds.setAttr(center_dist + ".operation", 2)
+        cmds.setAttr(center_dist + ".input1D[0]", param)
+        cmds.connectAttr(f"{target_ctrl}.{part}Center", center_dist + ".input1D[1]")
+
+        # abs
+        abs_node = cmds.createNode("multiplyDivide", name=f"{side}_{part}_abs_{i+1:04d}")
+        cmds.setAttr(abs_node + ".operation", 3)
+        cmds.connectAttr(center_dist + ".output1D", abs_node + ".input1X")
+        cmds.setAttr(abs_node + ".input2X", 2)
+
+        # remap
+        remap = cmds.createNode("remapValue", name=f"{side}_{part}_remap_{i+1:04d}")
+        cmds.connectAttr(abs_node + ".outputX", remap + ".inputValue")
+        cmds.setAttr(remap + ".inputMin", 0)
+        cmds.connectAttr(f"{target_ctrl}.{part}Falloff", remap + ".inputMax")
+
+        cmds.setAttr(remap + ".value[0].value_Position", 0)
+        cmds.setAttr(remap + ".value[0].value_FloatValue", 1)
+        cmds.setAttr(remap + ".value[1].value_Position", 1)
+        cmds.setAttr(remap + ".value[1].value_FloatValue", 0)
+
+        # squash offset
+        minusY = cmds.createNode("plusMinusAverage", name=f"{side}_{part}_minusY_{i+1:04d}")
+        cmds.setAttr(minusY + ".operation", 2)
+        cmds.connectAttr(con + ".outColorG", minusY + ".input1D[0]")
+        cmds.setAttr(minusY + ".input1D[1]", 1)
+
+        minusZ = cmds.createNode("plusMinusAverage", name=f"{side}_{part}_minusZ_{i+1:04d}")
+        cmds.setAttr(minusZ + ".operation", 2)
+        cmds.connectAttr(con + ".outColorB", minusZ + ".input1D[0]")
+        cmds.setAttr(minusZ + ".input1D[1]", 1)
+
+        # multiply
+        mult = cmds.createNode("multiplyDivide", name=f"{side}_{part}_mult_{i+1:04d}")
+        cmds.connectAttr(minusY + ".output1D", mult + ".input1Y")
+        cmds.connectAttr(minusZ + ".output1D", mult + ".input1Z")
+        cmds.connectAttr(remap + ".outValue", mult + ".input2Y")
+        cmds.connectAttr(remap + ".outValue", mult + ".input2Z")
+
+        # add back
+        add = cmds.createNode("plusMinusAverage", name=f"{side}_{part}_add_{i+1:04d}")
+        cmds.connectAttr(mult + ".outputY", add + ".input2D[0].input2Dx")
+        cmds.connectAttr(mult + ".outputZ", add + ".input2D[0].input2Dy")
+
+        cmds.setAttr(add + ".input2D[1].input2Dx", 1)
+        cmds.setAttr(add + ".input2D[1].input2Dy", 1)
+
+        # blend
+        bc = cmds.createNode("blendColors", name=f"{side}_{part}_bc_{i+1:04d}")
+        cmds.connectAttr(f"{target_ctrl}.{part}VolumeCentered", bc + ".blender")
+        cmds.connectAttr(add + ".output2Dx", bc + ".color1G")
+        cmds.connectAttr(add + ".output2Dy", bc + ".color1B")
+        cmds.connectAttr(con + ".outColorG", bc + ".color2G")
+        cmds.connectAttr(con + ".outColorB", bc + ".color2B")
 
 
+        # output
+        ctrl = f"driven_{side}_{prefix}Minor_ctrl_{i+1:04d}"
 
+        cmds.connectAttr(bc + ".outputG", ctrl + ".scaleY", force=True)
+        cmds.connectAttr(bc + ".outputB", ctrl + ".scaleZ", force=True)
 
-
-
-import maya.cmds as cmds
+def connect_twist_joint_to_ribbon(side='L',typ=None,prefix='Ribbon'):
+    for i in range (5):
+        i=i+1
+        twist = f'{side}_{typ}TwistBind_joint_000{i}'
+        connect_ribbon = f'connect_{side}_{typ}{prefix}Minor_ctrl_000{i}'
+        cmds.connectAttr(f'{twist}.rotateX',f'{connect_ribbon}.rotateX')
 
 def copy_curve_skin_L_to_R(source_curve, target_curve,source_side='L',target_side='R'):
     
@@ -371,11 +468,3 @@ def copy_curve_skin_L_to_R(source_curve, target_curve,source_side='L',target_sid
                 )
 
     cmds.setAttr(target_skin + ".normalizeWeights", 1)
-
-def connect_twist_joint_to_ribbon(side='L',typ=None,prefix='Ribbon'):
-    for i in range (5):
-        i=i+1
-        twist = f'{side}_{typ}TwistBind_joint_000{i}'
-        connect_ribbon = f'connect_{side}_{typ}{prefix}Minor_ctrl_000{i}'
-        cmds.connectAttr(f'{twist}.rotateX',f'{connect_ribbon}.rotateX')
-

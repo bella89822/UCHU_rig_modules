@@ -91,15 +91,21 @@ def mirror_ctrl(mode='normal'):
                     original_parent=cmds.listRelatives(grp_short,p=True)[0]
                     grp=cmds.parent(grp,world=True)[0]
 
-                pos_joint=cmds.createNode('joint',name=f'L_{part}_tmp_pos')
-                cmds.matchTransform(pos_joint,grp_short.replace('R','L'))
-                tx = cmds.getAttr(f'{pos_joint}.translateX')
-                cmds.setAttr(f'{pos_joint}.translateX', -tx)
-                cmds.setAttr(f'{pos_joint}.scaleX', -1)
+                pos_loc=cmds.spaceLocator(name=f'L_{part}_tmp_pos')
+                cmds.matchTransform(pos_loc,grp_short.replace('R','L'))
+                grp = cmds.createNode('transform')
+                cmds.parent(pos_loc,grp)
+                cmds.setAttr(f'{grp}.scaleX',-1)
+                cmds.parent(pos_loc,world=True)
+                pos_joint = cmds.createNode('joint')
+                cmds.matchTransform(pos_joint,pos_loc)
+                cmds.setAttr(f'{pos_joint}.scaleX',1)
+                
+        
                 cmds.matchTransform(grp_short, pos_joint)               
                 if original_parent:
                     cmds.parent(grp,original_parent)
-                cmds.delete(pos_joint)
+                cmds.delete(pos_joint,pos_loc,grp)
             elif mode == 'posX':
                 original_parent=None
                 if cmds.listRelatives(grp_short,p=True):
@@ -219,38 +225,6 @@ def mirror_joint_ctrl():
     print(f"Mirrored joint hierarchy created: {top_node}")
 
 
-def mirror_sdk( driver=None):
-    #driven is a list
-    R_driver= driver.replace('L_','R_')
-    if not cmds.objExists(R_driver):
-        cmds.warning(f'{R_driver} does not exist')
-        return
-    driven = cmds.ls(selection=True)
-    for d in driven:
-        R_d = d.replace('L_','R_')
-        if not cmds.objExists(R_d):
-            cmds.warning(f'{R_d} does not exist')
-            continue
-        for attr in ['translateX','translateY','translateZ']:
-            #get value from the driven and driver
-            driven_val = cmds.getAttr(f'{d}.{attr}')
-            driver_val = cmds.getAttr(f'{driver}.{attr}')
-            #to avoid 0 value being keyed
-        if driven_val != 0:
-            #set driven key for L side
-            cmds.setDrivenKeyframe(f'{d}.{attr}', cd=f'{driver}.{attr}',dv=0,v=0)
-            cmds.setDrivenKeyframe(f'{d}.{attr}', cd=f'{driver}.{attr}',dv=driver_val,v=driven_val)
-            #set driven key for R side
-            if attr in ['translateX','translateY','translateZ']:  #special case for X and Z axis
-                #only the translates are opposite
-                cmds.setDrivenKeyframe(f'{R_d}.{attr}', cd=f'{R_driver}.{attr}',dv=0,v=0)
-                cmds.setDrivenKeyframe(f'{R_d}.{attr}', cd=f'{R_driver}.{attr}',dv=driver_val,v=-driven_val)
-            else:
-                cmds.setDrivenKeyframe(f'{R_d}.{attr}', cd=f'{R_driver}.{attr}',dv=0,v=0)
-                cmds.setDrivenKeyframe(f'{R_d}.{attr}', cd=f'{R_driver}.{attr}',dv=driver_val,v=driven_val)
-            #zero out 
-            cmds.setAttr(f'{driver}.{attr}',0)
-            cmds.setAttr(f'{R_driver}.{attr}',0)
 
 
 def mirror_joint_with_grps():

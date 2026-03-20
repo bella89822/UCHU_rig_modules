@@ -1,5 +1,7 @@
 import maya.cmds as cmds
 import rig_modules.controller_shape as cs
+import maya.api.OpenMaya as om
+import maya.cmds as cmds
 def create_connect_fitBspline():
     curves=cmds.ls(selection=True)
     for curve in curves:
@@ -7,8 +9,7 @@ def create_connect_fitBspline():
         curve = cmds.listRelatives(curve, shapes = True)[0]
         # connect curve local to fitBspline input curve
         cmds.connectAttr(f"{curve}.local", f"{fitBspline}.inputCurve")
-import maya.api.OpenMaya as om
-import maya.cmds as cmds
+
 
 
 def get_param_on_curve(curve, position):
@@ -244,7 +245,6 @@ def attach_zero_to_curve_poci(ctrl_grp, curve):
 
     shape = cmds.listRelatives(curve, shapes=True)[0]
 
-    # 找所有 zero groups
     zeros = cmds.listRelatives(ctrl_grp, ad=True, type="transform")
 
     zeros = [z for z in zeros if z.startswith("zero_")]
@@ -276,7 +276,46 @@ def attach_zero_to_curve_poci(ctrl_grp, curve):
             force=True
         )
 
-        print(f"{zero} connected to curve param {param}")
+def attach_loc_to_curve_mp(loc_grp, curve):
+    normalize_curve_parameter(curve)
+
+    shape = cmds.listRelatives(curve, shapes=True)[0]
+
+    locs = cmds.listRelatives(loc_grp, children=True, type="transform")
+
+
+    for loc in locs:
+
+        pos = cmds.xform(loc, q=True, ws=True, t=True)
+
+        param = get_param_on_curve(curve, pos)
+
+        mp = cmds.createNode(
+            "motionPath",
+            name=loc.replace("loc", "mp")
+        )
+
+        cmds.connectAttr(
+            f"{shape}.worldSpace[0]",
+            f"{mp}.geometryPath",
+            force=True
+        )
+        cmds.setAttr(f'{mp}.uValue',param)
+
+        cmds.connectAttr(
+            f"{mp}.allCoordinates",
+            f"{loc}.translate",
+            force=True
+        )
+        cmds.connectAttr(
+            f"{mp}.rotate",
+            f"{loc}.rotate",
+            force=True
+        )
+
+
+
+
 
 
 
@@ -467,6 +506,7 @@ def attach_joints_on_curve(drive_curve, aim_curve, up_object, aim_type):
         #orginize nodes
         for attach_node, grp in zip(attach_nodes, attaches_grp):
             cmds.parent(attach_node, grp)
+
 
 def create_zip_lip(left_ctrl=None,right_ctrl=None,jaw_ctrl=None,zip_height=0.5,fallOff=3):
     upper_jnts = cmds.ls(selection=True)

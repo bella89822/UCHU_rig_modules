@@ -842,7 +842,7 @@ def copy_sdk_data(node, sdk_data,source='F',replace='B'):
                     # direct set value
                     cmds.setAttr(f'{weight_blend}.input[{i}]', d)
 
-import maya.cmds as cmds
+
 def connect_ctrl_to_loc(source,target):
     sels = cmds.ls(selection=True)
     for sel in sels:
@@ -852,3 +852,27 @@ def connect_ctrl_to_loc(source,target):
             cmds.connectAttr(f'{sel}.translate{a}',f'{loc}.translate{a}')
             cmds.connectAttr(f'{sel}.rotate{a}',f'{loc}.rotate{a}')
             cmds.connectAttr(f'{sel}.scale{a}',f'{loc}.scale{a}')
+
+
+
+
+
+def get_skin_joints(mesh):
+
+    skin = cmds.ls(cmds.listHistory(mesh), type="skinCluster")
+    
+    if not skin:
+        cmds.warning(f"No skinCluster found on {mesh}")
+        return []
+    
+    skin = skin[0]
+
+    joints = cmds.skinCluster(skin, q=True, influence=True)
+    cmds.select(joints)
+
+    return joints
+
+
+
+
+

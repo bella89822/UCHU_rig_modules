@@ -653,7 +653,7 @@ def create_ctrlgrp_on_ctrl_base(target=None):
        
         cmds.delete(ctrl,constructionHistory=True)
         #rename ctrl shape
-        ctrl_shape = cmds.listRelatives(ctrl,shapes=True)or[]
+        ctrl_shape = cmds.listRelatives(ctrl,shapes=True,fullPath=True)or[]
         for i,shape in enumerate(ctrl_shape):
             cmds.rename(shape,f'{ctrl}Shape{i+1}')
         #create sub ctrl
@@ -796,30 +796,10 @@ def set_ctrl_color_width(target=None,color_index=1,width=2):
             cmds.setAttr(f'{shape}.lineWidth', width)
             cmds.setAttr(f'{shape}.overrideEnabled', 1)
             cmds.setAttr(f"{shape}.overrideColor", color_index)
-
+#need to fix 
 def flip_ctrl_shape(targets=None,axis='XY',world=False):
-    '''
-    axis(str): the axis you want to flip, for example: 'XY' means flip on XY plane, which is the same as mirroring across Z axis
-    world(bool): whether to flip in world space or local space, default is local space
-    '''
-    if not targets:
-        targets=cmds.ls(selection=True)
-    if not targets:
-        cmds.warning('select at least one ctrl')
-        return
-        
-    ctrls=targets
-
-
-    shapes = cmds.listRelatives(ctrls, c=True, shapes=True, fullPath=True) or []
+    shapes = cmds.ls(selection=True)
     for shape in shapes:
         for cv in cmds.ls(f'{shape}.cv[*]', flatten=True):
             pos = cmds.xform(cv, q=True, t=True, )
-            cmds.xform(cv, t=[-pos[0], -pos[1], pos[2]])
-            if 'X' in axis:
-                cmds.xform(cv, t=[-pos[0], pos[1], pos[2]],ws=world)
-            if 'Y' in axis:
-                cmds.xform(cv, t=[pos[0], -pos[1], pos[2]],ws=world)
-            if 'Z' in axis:
-                cmds.xform(cv, t=[pos[0], pos[1], -pos[2]],ws=world)
-            
+            cmds.xform(cv, t=[pos[0], pos[1], -pos[2]])
